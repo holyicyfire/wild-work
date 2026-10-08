@@ -82,6 +82,9 @@ type App struct {
 	pricingCache   []provider.ModelPricing // 本地缓存
 	pricingFetched time.Time
 	pricingErr     string // 最近一次拉取错误
+
+	muModels    sync.Mutex              // 保护模型列表缓存
+	modelsCache map[string]modelsCacheEntry
 }
 
 // New 构建 App 并接管全局日志（写文件 + 环形缓冲）。
@@ -907,6 +910,10 @@ func apiError(w http.ResponseWriter, status int, msg string) {
 func (a *App) HandleAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, a.GetState())
+	})
+	mux.HandleFunc("GET /api/models", func(w http.ResponseWriter, r *http.Request) {
+		force := r.URL.Query().Get("refresh") == "1"
+		writeJSON(w, http.StatusOK, a.ModelsState(force))
 	})
 	mux.HandleFunc("POST /api/login/start", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

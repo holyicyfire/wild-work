@@ -209,3 +209,10 @@ body {
   .config-right { padding-left: 0; border-left: none; border-top: 1px solid var(--border); padding-top: 14px; }
   .acct-grid { grid-template-columns: 1fr; }
 }
+/* 可用模型 */
+.models { font-size: 13px; display: flex; flex-direction: column; gap: 14px; }
+.model-group .mg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mg-count { color: var(--muted); font-size: 12px; }
+.mg-error { color: var(--danger); font-size: 12px; margin-bottom: 6px; }
+.model-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-tag { background: #f3f4f6; border: 1px solid var(--border); color: #374151; padding: 4px 10px; border-radius: 14px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

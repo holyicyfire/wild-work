@@ -236,6 +236,36 @@ function renderFees(fees) {
   box.innerHTML = html;
 }
 
+// ---------- 可用模型 ----------
+async function loadModels(force) {
+  try {
+    const data = await api("/api/models" + (force ? "?refresh=1" : ""));
+    renderModels(data.groups || []);
+  } catch (e) {
+    $("modelsBox").innerHTML = `<div class="note">模型列表加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderModels(groups) {
+  const box = $("modelsBox");
+  if (!groups.length) { box.innerHTML = '<div class="note">暂无数据</div>'; return; }
+  box.innerHTML = groups.map((g) => {
+    const cls = g.group === "workbuddy" ? "wb" : (g.group === "qoder" ? "qoder" : "trae");
+    const srcTxt = g.source === "dynamic" ? "实时" : "静态兑底";
+    const errLine = g.error ? `<div class="mg-error">${esc(g.error)}</div>` : "";
+    const chips = (g.models || []).map((m) =>
+      `<span class="model-tag" title="${esc(m.name || m.id)}">${esc(m.id)}</span>`).join("");
+    return `<div class="model-group">
+      <div class="mg-head">
+        <span class="badge ${cls}">${esc(g.label)}</span>
+        <span class="mg-count">${g.count} 个模型 · ${srcTxt}</span>
+      </div>
+      ${errLine}
+      <div class="model-chips">${chips || '<span class="mg-count">无</span>'}</div>
+    </div>`;
+  }).join("");
+}
+
 // ---------- 账号操作 ----------
 async function checkin(uid) {
   try {
@@ -498,6 +528,11 @@ function bind() {
   $("btnCopyUrl").onclick = copyUrl;
   $("btnCancelLogin").onclick = cancelLogin;
   $("btnRefreshFees").onclick = refreshFees;
+  $("btnRefreshModels").onclick = async () => {
+    $("btnRefreshModels").disabled = true;
+    await loadModels(true);
+    $("btnRefreshModels").disabled = false;
+  };
   $("chkAutostart").onchange = toggleAutostart;
 
   $("apiAddr").onclick = () => {
@@ -546,6 +581,7 @@ function bind() {
   try {
     await loadState();
     await loadFees();
+    loadModels();
   } catch (e) {
     toast("无法连接后台服务：" + e.message);
   }
