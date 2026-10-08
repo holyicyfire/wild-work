@@ -257,6 +257,9 @@ func (a *App) StartLoginFor(kind string) (string, error) {
 	// 仅登录入口走企业实例（host/client_id 可由 config.enterprise_trae 覆盖）。
 	entLogin := norm == "traework_ent"
 	k := provider.Kind(norm)
+	if entLogin {
+		k = provider.TraeWork // 企业变体复用 traework 运行时，仅登录入口不同
+	}
 	if k == "" {
 		k = provider.WorkBuddy
 	}
