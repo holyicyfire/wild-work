@@ -174,3 +174,46 @@ func TestUserEntUsageEnterpriseNoOp(t *testing.T) {
 		t.Fatalf("enterprise usage should not hit upstream, calls=%d", calls)
 	}
 }
+
+// TestGetUserInfoEnterpriseDataFormat 企业实例 GetUserInfo 用 Data.* 信封（官方为 Result.*），
+// 字段名大小写变体也能提取。
+func TestGetUserInfoEnterpriseDataFormat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != EpUserInfo {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Cloudide-Token") != "at" {
+			t.Errorf("missing X-Cloudide-Token header")
+		}
+		_, _ = w.Write([]byte(`{"code":0,"Data":{"UserId":"ent-123","NickName":"张三","EnterpriseId":"ent-1"}}`))
+	}))
+	defer srv.Close()
+
+	a := &auth.Auth{Enterprise: true, ApiHost: srv.URL, AccessToken: "at"}
+	c := New()
+	c.HTTP = srv.Client()
+	uid, nick, ent, err := c.GetUserInfo(a)
+	if err != nil {
+		t.Fatalf("userinfo: %v", err)
+	}
+	if uid != "ent-123" || nick != "张三" || ent != "ent-1" {
+		t.Fatalf("uid=%q nick=%q ent=%q", uid, nick, ent)
+	}
+}
+
+// TestGetUserInfoPersonalResultFormat 个人版仍读 Result.*（不变量：老路径零改动）。
+func TestGetUserInfoPersonalResultFormat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Result":{"UserID":"p-1","ScreenName":"Leo","EnterpriseID":""}}`))
+	}))
+	defer srv.Close()
+
+	a := &auth.Auth{ApiHost: srv.URL, AccessToken: "at"}
+	c := New()
+	c.HTTP = srv.Client()
+	uid, nick, _, err := c.GetUserInfo(a)
+	if err != nil || uid != "p-1" || nick != "Leo" {
+		t.Fatalf("uid=%q nick=%q err=%v", uid, nick, err)
+	}
+}

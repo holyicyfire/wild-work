@@ -626,17 +626,48 @@ func (c *Client) GetUserInfo(a *auth.Auth) (uid, nickname, enterpriseID string, 
 	if err != nil {
 		return "", "", "", err
 	}
-	var resp struct {
-		Result struct {
-			UserID       string `json:"UserID"`
-			ScreenName   string `json:"ScreenName"`
-			EnterpriseID string `json:"EnterpriseID"`
-		} `json:"Result"`
+	// 响应双信封：官方读 Result.*，企业实例读 Data.*（与 ExchangeToken 一致，2026-10-08 实测）。
+	// 字段名做宽松提取，防大小写变体。
+	var env struct {
+		Result  map[string]any `json:"Result"`
+		Data    map[string]any `json:"Data"`
+		Code    int            `json:"code"`
+		Message string         `json:"message"`
 	}
-	if err := json.Unmarshal(data, &resp); err != nil {
+	if err := json.Unmarshal(data, &env); err != nil {
 		return "", "", "", fmt.Errorf("userinfo parse: %w", err)
 	}
-	return resp.Result.UserID, resp.Result.ScreenName, resp.Result.EnterpriseID, nil
+	container := env.Result
+	if uidFrom(container) == "" {
+		container = env.Data
+	}
+	uid = uidFrom(container)
+	if uid == "" {
+		if env.Code == EntCodeNotLogin {
+			return "", "", "", &provider.Error{Kind: provider.ErrSessionDead, Status: 200, Msg: fmt.Sprintf("enterprise code=%d msg=%s", env.Code, env.Message)}
+		}
+		// 未知信封/字段名：截断记录响应体（用户信息，无 token）辅助定位字段名
+		log.Printf("traework userinfo empty uid body=%s", truncate(string(data), 300))
+	}
+	return uid, strFrom(container, "ScreenName", "NickName", "Nickname", "nickname"), strFrom(container, "EnterpriseID", "EnterpriseId"), nil
+}
+
+// uidFrom 从信封 map 宽松提取用户 ID（兼容 UserID/UserId/userid/uid 字段名变体）。
+func uidFrom(m map[string]any) string { return strFrom(m, "UserID", "UserId", "userid", "uid") }
+
+// strFrom 按 key 候选顺序提取首个非空字符串。
+func strFrom(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if m == nil {
+			return ""
+		}
+		if v, ok := m[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func (c *Client) Classify(status int, body string) provider.ErrKind { return Classify(status, body) }
