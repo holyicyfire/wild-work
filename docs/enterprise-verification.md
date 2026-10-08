@@ -1,5 +1,10 @@
 # 企业版 Trae 接入 — Phase 2 真实账号验证清单
 
+> **状态：✅ 验证完成（2026-10-08）**。四项全部通过：① client_id=官方 solo id + auth_from=trae 可登录
+> ② ExchangeToken/refreshToken 链路正常 ③ chat 走 `/api/ide/v2/llm_raw_chat`（IDE/CLI 产品线协议，
+> 见 `internal/traework/entchat.go`）流式/非流式均通 ④ 模型列表 get_config_list 正常。
+> 以下清单保留作回归参考。
+
 > Phase 1 代码改造已完成（`feat/enterprise-trae` 分支）。本清单需在**公司网络内 + 真实企业账号**下按序执行，
 > 对应调研纪要 §6 的待验证项。每项给出预期结果与不一致时的处理分支。
 

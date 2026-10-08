@@ -187,6 +187,10 @@ func normalizeExpiresAt(v int64) int64 {
 }
 
 func (c *Client) ChatStream(a *auth.Auth, body []byte) (rc io.ReadCloser, status int, respBody []byte, err error) {
+	if a.Enterprise {
+		// 企业账号：llm_raw_chat 协议（IDE/CLI 产品线），见 entchat.go
+		return c.chatStreamEnterprise(a, body)
+	}
 	req, err := http.NewRequest(http.MethodPost, c.agentBaseFor(a)+EpChat, bytes.NewReader(PrepareBody(body)))
 	if err != nil {
 		return nil, 0, nil, err
@@ -212,6 +216,10 @@ func (c *Client) ChatStream(a *auth.Auth, body []byte) (rc io.ReadCloser, status
 }
 
 func (c *Client) FetchModels(a *auth.Auth) ([]provider.ModelInfo, error) {
+	if a.Enterprise {
+		// 企业账号：get_config_list（config_name/model_name 路由键与对话一致，见 entchat.go）
+		return c.FetchEntModels(a)
+	}
 	// traework 上游 llm_utils_chat 强制 stream=true（见 PrepareBody），
 	// 所有模型均为流式模式；非流式请求由本地 Aggregate() 缓冲 SSE 后聚合。
 	// mode_type=nil 返回全部配置，按 config_name 去重避免流式/非流式重复。

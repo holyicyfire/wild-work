@@ -217,3 +217,89 @@ func TestGetUserInfoPersonalResultFormat(t *testing.T) {
 		t.Fatalf("uid=%q nick=%q err=%v", uid, nick, err)
 	}
 }
+
+// TestEntBuildChatBody OpenAI 体 → llm_raw_chat 体：content 块化、developer→system、
+// 注入 config_name/model_name/conversation_id/session_id、剔除 stream/model/function。
+func TestEntBuildChatBody(t *testing.T) {
+	src := []byte(`{"model":"glm-5.2","stream":true,"messages":[
+		{"role":"developer","content":"be brief"},
+		{"role":"user","content":"hi"}]}`)
+	out, sess, err := entBuildChatBody(src, "glm-5.2", "glm-5.2__dev")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if sess == "" {
+		t.Fatal("session_id empty")
+	}
+	var m map[string]any
+	if json.Unmarshal(out, &m) != nil {
+		t.Fatal("output not json")
+	}
+	for _, k := range []string{"model", "stream", "function", "tool_choice"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("key %q should be removed", k)
+		}
+	}
+	if m["config_name"] != "glm-5.2" || m["model_name"] != "glm-5.2__dev" {
+		t.Fatalf("config/model = %v/%v", m["config_name"], m["model_name"])
+	}
+	msgs := m["messages"].([]any)
+	first := msgs[0].(map[string]any)
+	if first["role"] != "system" {
+		t.Fatalf("developer not rewritten: %v", first["role"])
+	}
+	blocks := first["content"].([]any)
+	blk := blocks[0].(map[string]any)
+	if blk["type"] != "text" || blk["text"] != "be brief" {
+		t.Fatalf("content block wrong: %v", blk)
+	}
+}
+
+// TestEntConfigListResolve get_config_list 解析 + 模型路由键解析（抓包 §2.5 结构）。
+func TestEntConfigListResolve(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != EntEpConfigList {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-App-Id") != EntAppID {
+			t.Errorf("missing X-App-Id")
+		}
+		_, _ = w.Write([]byte(`{"code":0,"config_info_list":[
+			{"config_name":"glm-5.2","display_config":{"display_name":"GLM-5.2"},
+			 "model_detail_list":[{"model_name":"glm-5.2__dev"}]},
+			{"config_name":"Doubao-Seed-2.1-pro","display_config":{"display_name":"Doubao-Seed-2.1-Pro"},
+			 "model_detail_list":[{"model_name":"Doubao-Seed-2.1-pro__v2"}]}]}`))
+	}))
+	defer srv.Close()
+
+	a := &auth.Auth{Enterprise: true, ApiHost: srv.URL, AccessToken: "at"}
+	c := New()
+	c.HTTP = srv.Client()
+	cfg, mn, display, err := c.entResolveModel(a, "GLM-5.2") // 大小写不敏感
+	if err != nil || cfg != "glm-5.2" || mn != "glm-5.2__dev" || display != "GLM-5.2" {
+		t.Fatalf("cfg=%q mn=%q display=%q err=%v", cfg, mn, display, err)
+	}
+	models, err := c.FetchEntModels(a)
+	if err != nil || len(models) != 2 || models[0].ID != "glm-5.2" {
+		t.Fatalf("models=%v err=%v", models, err)
+	}
+}
+
+// TestAggregateEnterpriseSSE 企业 llm_raw_chat SSE（含 progress_notice 非法 JSON 事件）
+// 能被现有解析器正常聚合。
+func TestAggregateEnterpriseSSE(t *testing.T) {
+	sse := "event: progress_notice\ndata: ;Processing_abc\n\n" +
+		"event: metadata\ndata: {\"model\":\"glm-5.2\",\"session_id\":\"s1\"}\n\n" +
+		"event: output\ndata: {\"response\":\"成功\",\"reasoning_content\":null,\"tool_calls\":null,\"multimodal_contents\":null,\"phase\":null}\n\n" +
+		"event: token_usage\ndata: {\"prompt_tokens\":5,\"completion_tokens\":1,\"total_tokens\":6}\n\n" +
+		"event: done\ndata: {\"finish_reason\":\"stop\"}\n\n"
+	res, err := Aggregate(strings.NewReader(sse))
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	msg := res["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	if msg["content"] != "成功" {
+		t.Fatalf("content=%v", msg["content"])
+	}
+}
