@@ -34,9 +34,10 @@ const (
 	EntDefaultConsoleHost = "https://trae.comnova.cc"
 	EntDefaultClientID    = ClientID // 默认沿用官方 solo id；验证失败改用 ono9krqynydwx5
 	EntAltClientID        = "ono9krqynydwx5"
-	// 企业版 auth_from 枚举含 solo（回调会追加 refreshToken，正是标准续期路径所需）。
-	// 与个人版一致，不改。
-	EntAuthFrom = "solo"
+	// 企业版默认 auth_from=trae（IDE 产品线）：实测企业套餐含 IDE/CLI 而不含 TRAE Work 时，
+	// auth_from=solo 会在授权页被套餐校验拒绝；IDE 同样在 refreshToken 追加名单内，
+	// 标准续期路径不受影响。CLI(traecli) 不在名单内，勿用。可通过 config 覆盖实测。
+	EntDefaultAuthFrom = "trae"
 )
 
 // 企业版业务码（HTTP 200 + body code 非零；与企业版前端错误码枚举一致）

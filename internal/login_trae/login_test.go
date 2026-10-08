@@ -7,8 +7,8 @@ import (
 	"wild-work/internal/traework"
 )
 
-// TestBuildAuthURLEnterprise 企业渠道：授权页指向企业实例 host，auth_from 仍为 solo
-//（企业枚举含 solo，回调会追加 refreshToken），PKCE 参数保留（企业端忽略）。
+// TestBuildAuthURLEnterprise 企业渠道：授权页指向企业实例 host，auth_from 默认 trae(IDE)
+//（企业套餐含 IDE 而不含 TRAE Work；IDE 在 refreshToken 追加名单内），PKCE 参数保留（企业端忽略）。
 func TestBuildAuthURLEnterprise(t *testing.T) {
 	opts := LoginOpts{Enterprise: true}.withDefaults()
 	if opts.ConsoleHost != traework.EntDefaultConsoleHost {
@@ -16,6 +16,9 @@ func TestBuildAuthURLEnterprise(t *testing.T) {
 	}
 	if opts.ClientID != traework.ClientID {
 		t.Fatalf("client id=%s, want %s", opts.ClientID, traework.ClientID)
+	}
+	if opts.AuthFrom != "trae" {
+		t.Fatalf("auth_from=%s, want trae", opts.AuthFrom)
 	}
 	callback := "http://127.0.0.1:57209/authorize"
 	raw := buildAuthURL(opts, callback, "m1", "d1", "cc")
@@ -27,8 +30,8 @@ func TestBuildAuthURLEnterprise(t *testing.T) {
 		t.Fatalf("host/path=%s%s, want trae.comnova.cc/authorization", u.Host, u.Path)
 	}
 	q := u.Query()
-	if q.Get("auth_from") != "solo" {
-		t.Fatalf("auth_from=%s, want solo", q.Get("auth_from"))
+	if q.Get("auth_from") != "trae" {
+		t.Fatalf("auth_from=%s, want trae", q.Get("auth_from"))
 	}
 	if q.Get("client_id") != traework.ClientID {
 		t.Fatalf("client_id=%s", q.Get("client_id"))
@@ -55,6 +58,14 @@ func TestBuildAuthURLPersonal(t *testing.T) {
 	q := u.Query()
 	if q.Get("client_id") != traework.ClientID || q.Get("auth_from") != "solo" {
 		t.Fatalf("client_id=%s auth_from=%s", q.Get("client_id"), q.Get("auth_from"))
+	}
+}
+
+// TestLoginOptsAuthFromOverride 企业渠道可覆盖 auth_from（如实测 vscode/jetbrains 通过而 trae 不通时）。
+func TestLoginOptsAuthFromOverride(t *testing.T) {
+	opts := LoginOpts{Enterprise: true, AuthFrom: "vscode"}.withDefaults()
+	if opts.AuthFrom != "vscode" {
+		t.Fatalf("auth_from=%s, want vscode", opts.AuthFrom)
 	}
 }
 

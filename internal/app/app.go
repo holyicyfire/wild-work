@@ -297,6 +297,9 @@ func (a *App) StartLoginFor(kind string) (string, error) {
 			if id := a.cfg.EnterpriseTrae.ClientID; id != "" {
 				opts.ClientID = id
 			}
+			if af := a.cfg.EnterpriseTrae.AuthFrom; af != "" {
+				opts.AuthFrom = af
+			}
 			authURL, err = logintrae.StartWithOpts(a.loginClient, a.loginStateFP, opts)
 		} else {
 			authURL, err = logintrae.Start(a.loginClient, a.loginStateFP)

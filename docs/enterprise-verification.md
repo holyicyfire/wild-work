@@ -10,18 +10,24 @@ go build -o dist/wild-work.exe ./cmd/wild-work && ./dist/wild-work.exe
 # 打开面板 http://127.0.0.1:7863，点「＋ Trae 企业版」
 ```
 
-## 1. client_id 校验（纪要 §6.1）
+## 1. client_id / auth_from 校验（纪要 §6.1，2026-10-08 实测更新）
 
-**步骤**：默认配置（官方 solo id `en1oxy7wnw8j9n`）走一遍登录；若失败，改 `config.json`：
+**实测发现**：`auth_from=solo`（TRAE Work 产品线）在企业授权页被套餐校验拒绝：
+「当前企业账号暂不支持 TRAE Work 使用，请联系管理员升级套餐或使用 TRAE IDE」。企业套餐包含 IDE 与 CLI。
 
-```json
-"enterprise_trae": { "console_host": "https://trae.comnova.cc", "client_id": "ono9krqynydwx5" }
-```
+**对策（已实施）**：企业渠道默认 `auth_from=trae`（IDE 产品线）——IDE 同样在 refreshToken 追加名单内，
+标准续期链路不受影响；CLI(traecli) 不在名单内，不可用。可配置覆盖。
 
-重启后再试。
+**测试矩阵**（按序试，改 `config.json` 后重启）：
 
-- **预期 A**：官方 id 直接通过 → 什么都不用改。
-- **预期 B**：官方 id 被拒、企业 CLI id 通过 → 配置保留企业 id（已支持，零代码改动）。
+| # | auth_from | client_id | 说明 |
+|---|-----------|-----------|------|
+| 1 | `trae`（默认） | 空（官方 solo id） | 首选组合 |
+| 2 | `trae` | `ono9krqynydwx5`（企业 CLI id） | 企业端校验 client_id 与 auth_from 配套时 |
+| 3 | `vscode` / `jetbrains` | 同上递试 | 均在 refreshToken 追加名单内，属套餐内客户端的备选 |
+
+- **预期 A**：授权页通过，回调带 refreshToken → 登录完成，进入 §2。
+- **预期 B**：仍报套餐不支持 → 说明该租户连 IDE 也不授权此流程（或需管理员开通），到此为止找管理员。
 
 ## 2. 登录回调与续期（纪要 §6.2）
 
@@ -38,7 +44,11 @@ go build -o dist/wild-work.exe ./cmd/wild-work && ./dist/wild-work.exe
 | 登录成功但 refresh 报 `exchange parse` / `no token` | 响应字段名在 `Result/Data` 之外 | 抓响应体（日志有前 200 字符），在 `RefreshToken` 再加一个候选字段 |
 | refresh 报 `enterprise code=30021` | refreshToken 无效/过期 | 重新登录；若反复出现说明企业 refreshToken 轮换策略不同，需调整保存逻辑 |
 
-## 3. chat 兼容性（纪要 §6.3）
+## 3. chat 兼容性（纪要 §6.3，含新风险项）
+
+**前提**：IDE 认证拿到 token 后，下一个待验证项就是 IDE 产品线是否覆盖 solo chat 接口：
+`llm_utils_chat` 是否接受 `function=solo_work_lite`。若服务端以业务码拒绝（如产品线不匹配），
+说明 IDE 授权不含该 API——那就是产品线确实未覆盖，找管理员开通 TRAE Work 才是正解，不要强行伪装。
 
 **步骤**：用任一 OpenAI 客户端发 `traework/<model>` 请求（模型列表先看第 4 步）。
 

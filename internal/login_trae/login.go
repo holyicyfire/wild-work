@@ -57,6 +57,10 @@ type LoginOpts struct {
 	ConsoleHost string
 	// ClientID OAuth 客户端 id；空取默认 ClientID（企业版可换 EntAltClientID 实测）。
 	ClientID string
+	// AuthFrom 授权客户端类型：solo(个人默认)/trae(IDE)/vscode/jetbrains/traecli。
+	// 企业默认 trae（IDE 在 refreshToken 追加名单内且套餐含 IDE）；
+	// traecli 不在名单内，回调不会带 refreshToken。
+	AuthFrom string
 	// Enterprise 标记企业渠道：登录成功后账号置 Enterprise=true，
 	// chat/models 路由到回调回传的单域名实例。
 	Enterprise bool
@@ -73,6 +77,13 @@ func (o LoginOpts) withDefaults() LoginOpts {
 	}
 	if o.ClientID == "" {
 		o.ClientID = traework.ClientID
+	}
+	if o.AuthFrom == "" {
+		if o.Enterprise {
+			o.AuthFrom = traework.EntDefaultAuthFrom
+		} else {
+			o.AuthFrom = "solo"
+		}
 	}
 	return o
 }
@@ -163,7 +174,7 @@ func buildAuthURL(opts LoginOpts, callback, machineID, deviceID, codeChallenge s
 	u, _ := url.Parse(opts.ConsoleHost + "/authorization")
 	v := u.Query()
 	v.Set("login_version", "1")
-	v.Set("auth_from", "solo") // 企业版枚举含 solo：命中 refreshToken 追加名单，标准续期路径原生兼容
+	v.Set("auth_from", opts.AuthFrom) // 个人版 solo；企业版默认 trae(IDE)：套餐含 IDE 且在 refreshToken 追加名单内
 	v.Set("login_channel", "native_ide")
 	v.Set("plugin_version", traework.PluginVersion)
 	v.Set("auth_type", "local")

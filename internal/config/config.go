@@ -115,6 +115,7 @@ type Config struct {
 	EnterpriseTrae struct {
 		ConsoleHost string `json:"console_host,omitempty"` // 授权页入口，如 https://trae.comnova.cc
 		ClientID    string `json:"client_id,omitempty"`    // 企业实例不认官方 id 时改填 ono9krqynydwx5
+		AuthFrom    string `json:"auth_from,omitempty"`    // 授权客户端类型：默认 trae(IDE)；套餐校验不认时可试 vscode/jetbrains；traecli 无 refreshToken 回调
 	} `json:"enterprise_trae,omitempty"`
 
 	// 解析后
