@@ -641,6 +641,10 @@ func (c *Client) GetUserInfo(a *auth.Auth) (uid, nickname, enterpriseID string, 
 	if uidFrom(container) == "" {
 		container = env.Data
 	}
+	// 企业实例多一层嵌套：Data.UserInfo.{UserID,Name,...}（2026-10-08 实测响应体）
+	if sub, ok := container["UserInfo"].(map[string]any); ok {
+		container = sub
+	}
 	uid = uidFrom(container)
 	if uid == "" {
 		if env.Code == EntCodeNotLogin {
@@ -649,7 +653,12 @@ func (c *Client) GetUserInfo(a *auth.Auth) (uid, nickname, enterpriseID string, 
 		// 未知信封/字段名：截断记录响应体（用户信息，无 token）辅助定位字段名
 		log.Printf("traework userinfo empty uid body=%s", truncate(string(data), 300))
 	}
-	return uid, strFrom(container, "ScreenName", "NickName", "Nickname", "nickname"), strFrom(container, "EnterpriseID", "EnterpriseId"), nil
+	nick := strFrom(container, "ScreenName", "Name", "NickName", "Nickname", "nickname", "Account")
+	ent := strFrom(container, "EnterpriseID", "EnterpriseId")
+	if ent == "" {
+		ent = strFrom(env.Data, "EnterpriseID", "EnterpriseId") // 企业实例可能挂在 Data 层
+	}
+	return uid, nick, ent, nil
 }
 
 // uidFrom 从信封 map 宽松提取用户 ID（兼容 UserID/UserId/userid/uid 字段名变体）。

@@ -175,8 +175,8 @@ func TestUserEntUsageEnterpriseNoOp(t *testing.T) {
 	}
 }
 
-// TestGetUserInfoEnterpriseDataFormat 企业实例 GetUserInfo 用 Data.* 信封（官方为 Result.*），
-// 字段名大小写变体也能提取。
+// TestGetUserInfoEnterpriseDataFormat 企业实例 GetUserInfo 用 Data.UserInfo.* 信封
+//（2026-10-08 实测响应体，官方为 Result.*），字段名 UserID/Name/EnterpriseID。
 func TestGetUserInfoEnterpriseDataFormat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != EpUserInfo {
@@ -186,7 +186,7 @@ func TestGetUserInfoEnterpriseDataFormat(t *testing.T) {
 		if r.Header.Get("X-Cloudide-Token") != "at" {
 			t.Errorf("missing X-Cloudide-Token header")
 		}
-		_, _ = w.Write([]byte(`{"code":0,"Data":{"UserId":"ent-123","NickName":"张三","EnterpriseId":"ent-1"}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"","Data":{"UserInfo":{"UserID":"6612729073695278","Name":"user@example.com","Account":"user@example.com","Email":"user@example.com","UserStatus":1,"RoleID":3},"EnterpriseID":"ent-1"}}`))
 	}))
 	defer srv.Close()
 
@@ -197,7 +197,7 @@ func TestGetUserInfoEnterpriseDataFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("userinfo: %v", err)
 	}
-	if uid != "ent-123" || nick != "张三" || ent != "ent-1" {
+	if uid != "6612729073695278" || nick == "" || ent != "ent-1" {
 		t.Fatalf("uid=%q nick=%q ent=%q", uid, nick, ent)
 	}
 }
