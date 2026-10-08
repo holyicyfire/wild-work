@@ -289,6 +289,21 @@ func (s *Scheduler) checkinOne(uid string) CheckinResult {
 		s.notifyCheckin(r)
 		return r
 	}
+	// 企业版 Trae 账号：无个人签到/积分活动，跳过签到，仅保证 token 有效（保活）。
+	if a.Enterprise {
+		if a.NeedsRefresh(2 * time.Hour) {
+			if err := s.refreshForCheckin(a, uid); err != nil {
+				r := CheckinResult{UID: uid, Msg: "refresh: " + shortErr(err)}
+				s.cfg.Pool.RecordCheckin(uid, false, r.Msg)
+				s.notifyCheckin(r)
+				return r
+			}
+		}
+		r := CheckinResult{UID: uid, OK: true, Msg: "企业账号无需签到"}
+		s.cfg.Pool.RecordCheckin(uid, true, r.Msg)
+		s.notifyCheckin(r)
+		return r
+	}
 	// 签到前保证 access token 有效；否则仅依赖晚间 keepalive 时，早上的签到可能拿过期 token。
 	if a.NeedsRefresh(2 * time.Hour) {
 		if err := s.refreshForCheckin(a, uid); err != nil {

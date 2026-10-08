@@ -65,6 +65,17 @@ func (c *Client) agentBase() string { return c.AgentHost }
 func (c *Client) ugBase() string    { return c.UgHost }
 func (c *Client) oauthBase() string { return c.OAuthHost }
 
+// agentBaseFor 按账号路由 chat/models host：
+// 企业版账号（ToB 单域名实例）走 ApiHost（登录回调回传的企业实例），
+// 个人版账号走全局 AgentHost。注意不能用“ApiHost 非空就用”判断——
+// 个人版 ApiHost 是 OAuth host（api.trae.com.cn），并非 chat host。
+func (c *Client) agentBaseFor(a *auth.Auth) string {
+	if a != nil && a.Enterprise && a.ApiHost != "" {
+		return a.ApiHost
+	}
+	return c.agentBase()
+}
+
 func (c *Client) doJSON(req *http.Request) (json.RawMessage, error) {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -93,7 +104,14 @@ func (c *Client) RefreshToken(a *auth.Auth) error {
 	if host == "" {
 		host = c.oauthBase()
 	}
-	body := map[string]any{"ClientID": c.ClientID, "RefreshToken": a.RefreshToken, "ClientSecret": "-", "UserID": ""}
+	var body map[string]any
+	if a.Enterprise {
+		// 企业版前端只发 {RefreshToken}（多余的 ClientID 等字段待实测是否被忽略，
+		// 保险起见企业分支用最小 body，与官方前端行为对齐）
+		body = map[string]any{"RefreshToken": a.RefreshToken}
+	} else {
+		body = map[string]any{"ClientID": c.ClientID, "RefreshToken": a.RefreshToken, "ClientSecret": "-", "UserID": ""}
+	}
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, host+EpExchange, bytes.NewReader(raw))
 	if err != nil {
@@ -105,6 +123,7 @@ func (c *Client) RefreshToken(a *auth.Auth) error {
 		log.Printf("traework refresh failed uid=%s err=%v", a.UID, err)
 		return err
 	}
+	// 响应双格式：官方读 Result.*，企业前端读 Data.*；两处都不存在时看业务 code。
 	var resp struct {
 		Result struct {
 			Token               string `json:"Token"`
@@ -112,26 +131,44 @@ func (c *Client) RefreshToken(a *auth.Auth) error {
 			TokenExpireDuration int64  `json:"TokenExpireDuration"`
 			RefreshToken        string `json:"RefreshToken"`
 		} `json:"Result"`
+		Data struct {
+			Token               string `json:"Token"`
+			TokenExpireAt       int64  `json:"TokenExpireAt"`
+			TokenExpireDuration int64  `json:"TokenExpireDuration"`
+			RefreshToken        string `json:"RefreshToken"`
+		} `json:"Data"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		err = fmt.Errorf("exchange parse: %w", err)
 		log.Printf("traework refresh failed uid=%s err=%v", a.UID, err)
 		return err
 	}
-	if resp.Result.Token == "" {
+	tok := resp.Result
+	if tok.Token == "" {
+		tok = resp.Data
+	}
+	if tok.Token == "" {
+		// 业务码错误（企业端 HTTP 200 + code 非零）：30021=RefreshTokenInvalid、30011=请先登录
+		if resp.Code == EntCodeRefreshInvalid || resp.Code == EntCodeNotLogin {
+			appErr := &provider.Error{Kind: provider.ErrSessionDead, Status: 200, Msg: fmt.Sprintf("enterprise code=%d msg=%s", resp.Code, resp.Message)}
+			log.Printf("traework refresh failed uid=%s err=%v", a.UID, appErr)
+			return appErr
+		}
 		err := fmt.Errorf("refresh_failed: no token in response — re-login required")
 		log.Printf("traework refresh failed uid=%s err=%v", a.UID, err)
 		return err
 	}
-	a.AccessToken = resp.Result.Token
-	if resp.Result.RefreshToken != "" {
-		a.RefreshToken = resp.Result.RefreshToken
+	a.AccessToken = tok.Token
+	if tok.RefreshToken != "" {
+		a.RefreshToken = tok.RefreshToken
 	}
-	if resp.Result.TokenExpireAt > 0 {
-		a.ExpiresAt = normalizeExpiresAt(resp.Result.TokenExpireAt)
-	} else if resp.Result.TokenExpireDuration > 0 {
-		d := time.Duration(resp.Result.TokenExpireDuration)
-		if resp.Result.TokenExpireDuration > 1e9 { // 上游通常是毫秒
+	if tok.TokenExpireAt > 0 {
+		a.ExpiresAt = normalizeExpiresAt(tok.TokenExpireAt)
+	} else if tok.TokenExpireDuration > 0 {
+		d := time.Duration(tok.TokenExpireDuration)
+		if tok.TokenExpireDuration > 1e9 { // 上游通常是毫秒
 			d *= time.Millisecond
 		} else {
 			d *= time.Second
@@ -150,7 +187,7 @@ func normalizeExpiresAt(v int64) int64 {
 }
 
 func (c *Client) ChatStream(a *auth.Auth, body []byte) (rc io.ReadCloser, status int, respBody []byte, err error) {
-	req, err := http.NewRequest(http.MethodPost, c.agentBase()+EpChat, bytes.NewReader(PrepareBody(body)))
+	req, err := http.NewRequest(http.MethodPost, c.agentBaseFor(a)+EpChat, bytes.NewReader(PrepareBody(body)))
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -180,7 +217,7 @@ func (c *Client) FetchModels(a *auth.Auth) ([]provider.ModelInfo, error) {
 	// mode_type=nil 返回全部配置，按 config_name 去重避免流式/非流式重复。
 	body := map[string]any{"function": Function, "config_names": nil, "need_prompt": false, "current_config_info": nil, "poly_prompt": true, "mode_type": nil, "agent_type": nil}
 	raw, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, c.agentBase()+EpModels, bytes.NewReader(raw))
+	req, err := http.NewRequest(http.MethodPost, c.agentBaseFor(a)+EpModels, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +264,9 @@ func (c *Client) FetchModels(a *auth.Auth) ([]provider.ModelInfo, error) {
 // FetchModelPricing 从 /api/remote/v1/models 拉取模型积分倍率。
 // 按 config_name 去重，解析 features.consumption_rate.rate。
 func (c *Client) FetchModelPricing(a *auth.Auth) ([]provider.ModelPricing, error) {
+	if a.Enterprise {
+		return nil, fmt.Errorf("企业账号无公开定价接口")
+	}
 	url := WorkHost + EpModelsPricing + "?functions=solo_agent_remote,solo_work_remote,solo_design_remote&show_custom_model=true"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -409,6 +449,12 @@ func (c *Client) CheckinClaim(a *auth.Auth) error {
 }
 
 func (c *Client) DailyCheckin(a *auth.Auth) error {
+	if a.Enterprise {
+		// 企业积分由租户管理，无个人签到活动；调用方（scheduler）已在更早分层跳过，
+		// 此处保底 no-op，避免误打个人版 UgHost 接口。
+		log.Printf("traework checkin skip uid=%s reason=enterprise", a.UID)
+		return fmt.Errorf("企业账号无签到活动")
+	}
 	log.Printf("traework checkin start uid=%s", a.UID)
 	checked, _, enable, err := c.CheckinStatus(a)
 	if err != nil {
@@ -462,6 +508,11 @@ func checkinResponseMessage(message, msg string) string {
 func (c *Client) UserResource(a *auth.Auth) (remain int64, err error) { return c.UserEntUsage(a) }
 
 func (c *Client) UserEntUsage(a *auth.Auth) (remain int64, err error) {
+	if a.Enterprise {
+		// 企业积分由租户管理，个人版 web_user_ent_usage 端点对企业账号无意义；
+		// 返回 0 与明确错误，调用方按 best-effort 处理，不影响 token keepalive。
+		return 0, fmt.Errorf("企业账号积分由租户管理，暂不支持查询")
+	}
 	// 网页版 web_user_ent_usage：require_usage=true 返回每个包的 usage.credits_amount（实际用量），
 	// 剩余 = Σ(credits_limit - credits_amount)。
 	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpEntUsage, bytes.NewReader([]byte(`{"require_usage":true}`)))

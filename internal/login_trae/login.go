@@ -34,6 +34,7 @@ type Result struct {
 	UID          string
 	EnterpriseID string
 	Nickname     string
+	Enterprise   bool // 企业版 Trae 账号
 }
 
 type state struct {
@@ -44,23 +45,57 @@ type state struct {
 	AuthCode     string `json:"authCode,omitempty"`   // PKCE 新流程：回调 authCodeInfo 里的 AuthCode
 	CodeVerifier string `json:"codeVerifier,omitempty"` // 登录 URL 配对的 PKCE verifier（必须保存）
 	Host         string `json:"host,omitempty"`
+	Enterprise   bool   `json:"enterprise,omitempty"` // 企业渠道登录
 	Err          string `json:"err,omitempty"`
 }
 
 func NewClient() *http.Client { return &http.Client{Timeout: 30 * time.Second} }
 
-// Start 启动本地一次性回调监听，返回 Trae 授权 URL。
+// LoginOpts 渠道变体参数：个人版（官方多域名）用零值即可；企业版传入企业实例配置。
+type LoginOpts struct {
+	// ConsoleHost 授权页入口，如 https://trae.comnova.cc；空取官方 ConsoleHost（企业渠道取 EntDefaultConsoleHost）。
+	ConsoleHost string
+	// ClientID OAuth 客户端 id；空取默认 ClientID（企业版可换 EntAltClientID 实测）。
+	ClientID string
+	// Enterprise 标记企业渠道：登录成功后账号置 Enterprise=true，
+	// chat/models 路由到回调回传的单域名实例。
+	Enterprise bool
+}
+
+// withDefaults 填充空字段。
+func (o LoginOpts) withDefaults() LoginOpts {
+	if o.ConsoleHost == "" {
+		if o.Enterprise {
+			o.ConsoleHost = traework.EntDefaultConsoleHost
+		} else {
+			o.ConsoleHost = traework.ConsoleHost
+		}
+	}
+	if o.ClientID == "" {
+		o.ClientID = traework.ClientID
+	}
+	return o
+}
+
+// Start 启动本地一次性回调监听，返回 Trae 授权 URL（个人版官方入口）。
 func Start(client *http.Client, statePath string) (string, error) {
+	return StartWithOpts(client, statePath, LoginOpts{})
+}
+
+// StartWithOpts 按渠道变体启动登录。企业版传 LoginOpts{Enterprise: true}（或自定义 host/client_id）。
+func StartWithOpts(client *http.Client, statePath string, opts LoginOpts) (string, error) {
+	opts = opts.withDefaults()
 	machineID := randHex(32)     // 真实客户端 64 位 hex（32 字节）
 	deviceID := randNumericID()  // 真实客户端 15 位数字设备 ID（首次绑定随机产生）
-	codeVerifier, codeChallenge := traework.GenPKCE() // PKCE：verifier 必须保存，交换 AuthCode 时用
+	codeVerifier, codeChallenge := traework.GenPKCE() // PKCE：verifier 必须保存，交换 AuthCode 时用；
+	// 企业版无 PKCE 端点（405），但授权页会忽略 code_challenge 参数，保留无妨
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err
 	}
 	addr := ln.Addr().String()
 	callback := "http://" + addr + "/authorize"
-	st := state{MachineID: machineID, DeviceID: deviceID, CodeVerifier: codeVerifier}
+	st := state{MachineID: machineID, DeviceID: deviceID, CodeVerifier: codeVerifier, Enterprise: opts.Enterprise}
 	if err := writeState(statePath, st); err != nil {
 		_ = ln.Close()
 		return "", err
@@ -87,7 +122,11 @@ func Start(client *http.Client, statePath string) (string, error) {
 		q := r.URL.Query()
 		st.Host = q.Get("host")
 		if st.Host == "" {
-			st.Host = traework.OAuthHost
+			if st.Enterprise {
+				st.Host = traework.EntDefaultConsoleHost // 企业回调应回传 host；兜底用企业实例
+			} else {
+				st.Host = traework.OAuthHost
+			}
 		}
 		// 解析回调凭证：优先 refreshToken；缺省时从 userJwt（URL 编码 JSON）兜底取 RefreshToken/Token，
 		// 再尝试 PKCE 新流程 authCodeInfo.AuthCode
@@ -115,14 +154,20 @@ func Start(client *http.Client, statePath string) (string, error) {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	u, _ := url.Parse(traework.ConsoleHost + "/authorization")
+	return buildAuthURL(opts, callback, machineID, deviceID, codeChallenge), nil
+}
+
+// buildAuthURL 拼授权页 URL（企业/个人渠道共用；host/client_id 由 opts 驱动）。
+// PKCE 参数对两种渠道都携带：个人版必填，企业版授权页忽略，保留无妨。
+func buildAuthURL(opts LoginOpts, callback, machineID, deviceID, codeChallenge string) string {
+	u, _ := url.Parse(opts.ConsoleHost + "/authorization")
 	v := u.Query()
 	v.Set("login_version", "1")
-	v.Set("auth_from", "solo")
+	v.Set("auth_from", "solo") // 企业版枚举含 solo：命中 refreshToken 追加名单，标准续期路径原生兼容
 	v.Set("login_channel", "native_ide")
 	v.Set("plugin_version", traework.PluginVersion)
 	v.Set("auth_type", "local")
-	v.Set("client_id", traework.ClientID)
+	v.Set("client_id", opts.ClientID)
 	v.Set("redirect", "0")
 	v.Set("login_trace_id", newUUID())
 	v.Set("auth_callback_url", callback)
@@ -142,8 +187,7 @@ func Start(client *http.Client, statePath string) (string, error) {
 	v.Set("channel_name", "common")
 	v.Set("click_id", "TRAE SOLOSetup-stable-"+traework.PluginVersion)
 	u.RawQuery = v.Encode()
-	_ = client
-	return u.String(), nil
+	return u.String()
 }
 
 // Poll 检查回调是否已写入 state，完成后 ExchangeToken + GetUserInfo。
@@ -163,11 +207,15 @@ func Poll(client *http.Client, statePath string) (Result, error) {
 		return Result{}, ErrPending
 	}
 	if st.Host == "" {
-		st.Host = traework.OAuthHost
+		if st.Enterprise {
+			st.Host = traework.EntDefaultConsoleHost
+		} else {
+			st.Host = traework.OAuthHost
+		}
 	}
 	c := traework.New()
 	c.HTTP = client
-	a := &auth.Auth{Kind: "traework", RefreshToken: st.RefreshToken, AccessToken: st.AccessToken, ApiHost: st.Host, MachineID: st.MachineID, DeviceID: st.DeviceID, Domain: "trae.cn"}
+	a := &auth.Auth{Kind: "traework", RefreshToken: st.RefreshToken, AccessToken: st.AccessToken, ApiHost: st.Host, MachineID: st.MachineID, DeviceID: st.DeviceID, Domain: "trae.cn", Enterprise: st.Enterprise}
 	if st.AuthCode != "" {
 		// PKCE 新流程：AuthCode + codeVerifier + 设备公钥交换
 		res, err := c.ExchangeAuthCode(a, st.AuthCode, st.CodeVerifier)
@@ -197,7 +245,7 @@ func Poll(client *http.Client, statePath string) (Result, error) {
 		return Result{}, err
 	}
 	_ = os.Remove(statePath)
-	return Result{AccessToken: a.AccessToken, RefreshToken: a.RefreshToken, ExpiresAt: a.ExpiresAt, Domain: "trae.cn", ApiHost: st.Host, MachineID: st.MachineID, DeviceID: st.DeviceID, UID: uid, EnterpriseID: ent, Nickname: nick}, nil
+	return Result{AccessToken: a.AccessToken, RefreshToken: a.RefreshToken, ExpiresAt: a.ExpiresAt, Domain: "trae.cn", ApiHost: st.Host, MachineID: st.MachineID, DeviceID: st.DeviceID, UID: uid, EnterpriseID: ent, Nickname: nick, Enterprise: st.Enterprise}, nil
 }
 
 func SaveAuth(authDir string, r Result) (string, error) {
@@ -206,7 +254,7 @@ func SaveAuth(authDir string, r Result) (string, error) {
 	}
 	doc := map[string]any{
 		"auth":    map[string]any{"accessToken": r.AccessToken, "refreshToken": r.RefreshToken, "expiresAt": r.ExpiresAt, "domain": r.Domain, "apiHost": r.ApiHost, "machineId": r.MachineID, "deviceId": r.DeviceID},
-		"account": map[string]any{"uid": r.UID, "enterpriseId": r.EnterpriseID, "nickname": r.Nickname},
+		"account": map[string]any{"uid": r.UID, "enterpriseId": r.EnterpriseID, "nickname": r.Nickname, "enterprise": r.Enterprise},
 	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {

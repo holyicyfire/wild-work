@@ -23,32 +23,33 @@ Wild-Work 是 WorkBuddy/TraeWork/Qoder 三渠道账号聚合工具，演进历�
 
 ## 1. 已定决议项（不要推翻，除非有强理由并更新本节）
 
-| # | 决议 | 说明 |
-|---|------|------|
-| R1 | **托盘菜单固定，不做动态内容、不做定时/事件刷新** | 用户在自己客户端操作无法捕捉，动态展示无意义 |
-| R2 | ~~托盘提供「刷新积分」菜单~~ **已移除**。刷新积分改为 Web UI 面板操作 | 托盘菜单精简为：打开主界面 / 查看日志 / 退出 |
-| R3 | 托盘固定菜单项：**打开主界面 / 查看日志 / 退出** | 双击托盘 = 打开主界面；不再弹"已启动"提示框 |
-| R4 | **不设管理 API 鉴权** | 单机个人工具；监听 0.0.0.0 的风险由用户承担，UI/文档给一句风险提示 |
-| R5 | **Web UI 用纯静态 HTML/CSS/JS**（无前端编译链） | `go:embed` 打进单文件；实用 + 大众审美即可 |
-| R6 | 托盘库：**保留 energye/systray**（已跨平台 Win/mac/Linux） | 各菜单项使用不同颜色纯 Go 生成图标，无需外部图标文件 |
-| R7 | **移除 wails / WebView2 全部依赖** | 省内存与运行时；平台能力封装进 `internal/platform`（build tag 拆分） |
-| R8 | daemon 单进程：一个 `http.Server` 同时服务 OpenAI 端点 + 管理 API + 静态 UI | 沿用 server 现有 ServeMux 扩展 |
-| R9 | 核心业务（pool/scheduler/upstream/traework/server/login/config/auth/provider）**整体复用**，格式零迁移 | config.json / auths/ / data/state.json 兼容旧版；旧 state.json 自动迁移到 state-workbuddy.json |
-| R10 | 新增渠道扩展方式：实现 `provider.Upstream` 接口 + auth 加载器 + 注册 Runtime | 模型前缀 `channel/<model>` 路由；已实现 WorkBuddy + TraeWork + Qoder 三渠道 |
-| R11 | Windows 产物在 WSL 交叉编译（`GOOS=windows CGO_ENABLED=0`，已验证可行）；macOS 产物走 GitHub Actions macos-latest（cgo 必需） | WSL 无法编 darwin cgo；CI 增加 darwin job |
-| R12 | **无桌面 Linux 使用 `--no-tray` 参数** | 无参启动在无 DBus 环境托盘 panic 直接 exit 并提示；`--no-tray` 跳过托盘打印信息阻塞等待 Ctrl+C |
+| #   | 决议                                                                                                             | 说明                                                                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | **托盘菜单固定，不做动态内容、不做定时/事件刷新**                                                                                    | 用户在自己客户端操作无法捕捉，动态展示无意义                                                                                                                                                                    |
+| R2  | ~~托盘提供「刷新积分」菜单~~ **已移除**。刷新积分改为 Web UI 面板操作                                                                    | 托盘菜单精简为：打开主界面 / 查看日志 / 退出                                                                                                                                                                 |
+| R3  | 托盘固定菜单项：**打开主界面 / 查看日志 / 退出**                                                                                  | 双击托盘 = 打开主界面；不再弹"已启动"提示框                                                                                                                                                                  |
+| R4  | **不设管理 API 鉴权**                                                                                                | 单机个人工具；监听 0.0.0.0 的风险由用户承担，UI/文档给一句风险提示                                                                                                                                                   |
+| R5  | **Web UI 用纯静态 HTML/CSS/JS**（无前端编译链）                                                                            | `go:embed` 打进单文件；实用 + 大众审美即可                                                                                                                                                              |
+| R6  | 托盘库：**保留 energye/systray**（已跨平台 Win/mac/Linux）                                                                 | 各菜单项使用不同颜色纯 Go 生成图标，无需外部图标文件                                                                                                                                                              |
+| R7  | **移除 wails / WebView2 全部依赖**                                                                                   | 省内存与运行时；平台能力封装进 `internal/platform`（build tag 拆分）                                                                                                                                         |
+| R8  | daemon 单进程：一个 `http.Server` 同时服务 OpenAI 端点 + 管理 API + 静态 UI                                                    | 沿用 server 现有 ServeMux 扩展                                                                                                                                                                  |
+| R9  | 核心业务（pool/scheduler/upstream/traework/server/login/config/auth/provider）**整体复用**，格式零迁移                         | config.json / auths/ / data/state.json 兼容旧版；旧 state.json 自动迁移到 state-workbuddy.json                                                                                                       |
+| R10 | 新增渠道扩展方式：实现 `provider.Upstream` 接口 + auth 加载器 + 注册 Runtime                                                     | 模型前缀 `channel/<model>` 路由；已实现 WorkBuddy + TraeWork + Qoder 三渠道                                                                                                                            |
+| R11 | Windows 产物在 WSL 交叉编译（`GOOS=windows CGO_ENABLED=0`，已验证可行）；macOS 产物走 GitHub Actions macos-latest（cgo 必需）         | WSL 无法编 darwin cgo；CI 增加 darwin job                                                                                                                                                       |
+| R12 | **无桌面 Linux 使用 `--no-tray` 参数**                                                                                | 无参启动在无 DBus 环境托盘 panic 直接 exit 并提示；`--no-tray` 跳过托盘打印信息阻塞等待 Ctrl+C                                                                                                                        |
+| R13 | **企业版 Trae 不是独立渠道**：与个人版共用 traework 运行时/账号池/模型前缀 `traework/<model>`，仅在 `auth.Auth` 上加 `Enterprise bool` 标志驱动差异 | 企业账号 chat/models 走回调回传的单域名实例（`agentBaseFor`），续期 body 只发 `{RefreshToken}`、响应兼容 `Data.*`，签到/积分/定价 no-op；登录入口 `traework_ent`（`logintrae.LoginOpts`），配置段 `enterprise_trae` 可覆盖 host/client_id |
 
 ## 2. 架构选型（依据）
 
-| 主题 | 选型 | 理由 |
-|------|------|------|
-| GUI 壳 | **无**（删除 wails） | WebView2 内存开销大 + Windows 绑定；托盘 + 浏览器足够 |
-| 托盘 | energye/systray v1.0.3（现有） | 已跨平台；菜单固定方案规避其不可删菜单项限制 |
-| 管理后端 | 现有 http.Server 扩展 /api/* | 单端口、复用鉴权中间件（无鉴权）、零新服务 |
-| Web UI | 纯静态 embed + fetch | 无 Node 构建链，单 exe 双击即用 |
-| 登录 | 复用 internal/login + login_trae | 纯 HTTP + 本地回调端口，跨平台 |
-| 平台能力 | internal/platform + build tag（windows/darwin/other） | 浏览器无痕/开机自启/消息框/日志/工作区，接口同名 |
-| 构建 | WSL 交叉编译 win；CI macos-latest 编 darwin | 见 R11 |
+| 主题     | 选型                                                  | 理由                                     |
+| ------ | --------------------------------------------------- | -------------------------------------- |
+| GUI 壳  | **无**（删除 wails）                                     | WebView2 内存开销大 + Windows 绑定；托盘 + 浏览器足够 |
+| 托盘     | energye/systray v1.0.3（现有）                          | 已跨平台；菜单固定方案规避其不可删菜单项限制                 |
+| 管理后端   | 现有 http.Server 扩展 /api/*                            | 单端口、复用鉴权中间件（无鉴权）、零新服务                  |
+| Web UI | 纯静态 embed + fetch                                   | 无 Node 构建链，单 exe 双击即用                  |
+| 登录     | 复用 internal/login + login_trae                      | 纯 HTTP + 本地回调端口，跨平台                    |
+| 平台能力   | internal/platform + build tag（windows/darwin/other） | 浏览器无痕/开机自启/消息框/日志/工作区，接口同名             |
+| 构建     | WSL 交叉编译 win；CI macos-latest 编 darwin               | 见 R11                                  |
 
 ## 3. 托盘菜单设计（当前形态）
 
@@ -67,12 +68,12 @@ wild-work
 
 ## 4. Web UI 页面规划（纯静态，一个 index.html + app.js + style.css）
 
-| 页面/区块 | 内容 |
-|-----------|------|
-| 顶部栏 | 品牌名/版本号、API 地址（点击弹窗配置）、API-Key（点击弹窗修改）、帮助/关于 |
-| 账号管理 | 双列卡片网格，账号名/UID/积分/签到状态，图标按钮操作（签到/刷新/停用/删除） |
-| 自动签到 | 签到时间（HH:MM 多组）+ 开机自启开关（左右布局） |
-| 渠道费率 | 三渠道模型定价表（按渠道分组，合并单元格），刷新按钮 |
+| 页面/区块 | 内容                                           |
+| ----- | -------------------------------------------- |
+| 顶部栏   | 品牌名/版本号、API 地址（点击弹窗配置）、API-Key（点击弹窗修改）、帮助/关于 |
+| 账号管理  | 双列卡片网格，账号名/UID/积分/签到状态，图标按钮操作（签到/刷新/停用/删除）   |
+| 自动签到  | 签到时间（HH:MM 多组）+ 开机自启开关（左右布局）                 |
+| 渠道费率  | 三渠道模型定价表（按渠道分组，合并单元格），刷新按钮                   |
 
 管理 API（REST，均挂 `/api/*`）：
 
@@ -123,14 +124,14 @@ POST /api/quit                     # 退出程序
 
 ## 7. 平台能力差异表（internal/platform）
 
-| 能力 | Windows | macOS | Linux |
-|------|---------|-------|-------|
-| 打开浏览器 | rundll32 url.dll | `open <url>` | xdg-open |
-| 系统消息框 | MessageBoxW | osascript display dialog | stderr |
-| 开机自启 | 注册表 Run | LaunchAgent plist | 未实现 |
-| 打开日志文件 | notepad | open -a TextEdit | xdg-open |
-| 确认框 | MessageBoxW YESNO | osascript buttons | 默认否 |
-| 无头模式 | --no-tray | --no-tray | --no-tray（推荐） |
+| 能力     | Windows           | macOS                    | Linux         |
+| ------ | ----------------- | ------------------------ | ------------- |
+| 打开浏览器  | rundll32 url.dll  | `open <url>`             | xdg-open      |
+| 系统消息框  | MessageBoxW       | osascript display dialog | stderr        |
+| 开机自启   | 注册表 Run           | LaunchAgent plist        | 未实现           |
+| 打开日志文件 | notepad           | open -a TextEdit         | xdg-open      |
+| 确认框    | MessageBoxW YESNO | osascript buttons        | 默认否           |
+| 无头模式   | --no-tray         | --no-tray                | --no-tray（推荐） |
 
 ## 8. 构建
 

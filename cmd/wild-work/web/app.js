@@ -153,8 +153,8 @@ function renderAccounts() {
 
   grid.innerHTML = state.accounts.map((a) => {
     const group = a.group === "traework" ? "trae" : (a.group === "qoder" ? "qoder" : "wb");
-    const groupName = a.group === "traework" ? "TraeWork" : (a.group === "qoder" ? "Qoder" : "WorkBuddy");
-    const noCheckin = a.group === "qoder"; // Qoder 无签到活动，签到按钮灰掉
+    const groupName = a.enterprise ? "Trae 企业版" : (a.group === "traework" ? "TraeWork" : (a.group === "qoder" ? "Qoder" : "WorkBuddy"));
+    const noCheckin = a.group === "qoder" || !!a.enterprise; // Qoder/企业版无签到活动，签到按钮灰掉
 
     const checkinTag = a.last_checkin_at
       ? `<span class="tag ${a.last_checkin_ok ? "ok" : "bad"}">${a.last_checkin_ok ? "签到成功" : "签到失败"}</span>`
@@ -164,7 +164,7 @@ function renderAccounts() {
     const disableIcon = a.disabled ? "▶" : "⏸";
     const disableTitle = a.disabled ? "启用" : "停用";
     const checkinBtn = noCheckin
-      ? `<span class="icon-op off" title="Qoder 无签到活动" onclick="return false">✓</span>`
+      ? `<span class="icon-op off" title="${a.enterprise ? "企业版无签到活动" : "Qoder 无签到活动"}" onclick="return false">✓</span>`
       : `<span class="icon-op" title="签到" onclick="checkin('${a.uid}')">✓</span>`;
 
     return `
@@ -304,11 +304,11 @@ async function refreshAll() {
 let pendingChannel = null;
 function promptLogin(channel) {
   pendingChannel = channel;
-  const name = channel === "traework" ? "TraeWork" : (channel === "qoder" ? "Qoder" : "WorkBuddy");
+  const name = channel === "traework_ent" ? "Trae 企业版" : (channel === "traework" ? "TraeWork" : (channel === "qoder" ? "Qoder" : "WorkBuddy"));
   $("lcTitle").textContent = "添加 " + name + " 账号";
   $("lcMsg").textContent = channel === "qoder"
     ? `点击「登录${name}」将打开浏览器窗口，请按照指示正常登录${name}账号，登录成功后关闭浏览器窗口即可。（${name} 渠道无签到活动，仅 API 转发）`
-    : `点击「登录${name}」将打开浏览器窗口，请按照指示正常登录${name}账号，登录成功后关闭浏览器窗口即可。`;
+    : `点击「登录${name}」将打开浏览器窗口，请按照指示正常登录${name}账号，登录成功后关闭浏览器窗口即可。${channel === "traework_ent" ? "（企业版账号无签到/积分活动，仅 API 转发）" : ""}`;
   $("btnLoginConfirm").textContent = "登录" + name;
   $("loginConfirmOverlay").classList.remove("hidden");
 }
@@ -322,7 +322,7 @@ async function startLogin(channel) {
     const r = await api("/api/login/start", { channel });
     const url = r.auth_url;
     if (!url) { toast("无法获取登录链接"); return; }
-    $("loginTitle").textContent = channel === "traework" ? "添加 TraeWork 账号" : (channel === "qoder" ? "添加 Qoder 账号" : "添加 WorkBuddy 账号");
+    $("loginTitle").textContent = channel === "traework_ent" ? "添加 Trae 企业版账号" : (channel === "traework" ? "添加 TraeWork 账号" : (channel === "qoder" ? "添加 Qoder 账号" : "添加 WorkBuddy 账号"));
     $("loginMsg").textContent = "请在浏览器新窗口中完成登录…";
     $("loginOverlay").classList.remove("hidden");
     $("btnCopyUrl").dataset.url = url;
@@ -490,6 +490,7 @@ function confirmDialog(msg, onOk) {
 function bind() {
   $("btnAddWB").onclick = () => promptLogin("workbuddy");
   $("btnAddTrae").onclick = () => promptLogin("traework");
+  $("btnAddTraeEnt").onclick = () => promptLogin("traework_ent");
   $("btnAddQoder").onclick = () => promptLogin("qoder");
   $("btnCheckinAll").onclick = checkinAll;
   $("btnRefreshAll").onclick = refreshAll;

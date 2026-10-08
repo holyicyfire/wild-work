@@ -111,6 +111,12 @@ type Config struct {
 		TimeoutSeconds int `json:"timeout_seconds"` // 默认 120
 	} `json:"upstream"`
 
+	// 企业版 Trae（ToB 单域名实例）渠道配置；缺省用内置常量（trae.comnova.cc + 官方 solo client_id）。
+	EnterpriseTrae struct {
+		ConsoleHost string `json:"console_host,omitempty"` // 授权页入口，如 https://trae.comnova.cc
+		ClientID    string `json:"client_id,omitempty"`    // 企业实例不认官方 id 时改填 ono9krqynydwx5
+	} `json:"enterprise_trae,omitempty"`
+
 	// 解析后
 	HardCreditDur  time.Duration `json:"-"`
 	SoftRateDur    time.Duration `json:"-"`

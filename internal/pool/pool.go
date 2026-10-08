@@ -50,6 +50,7 @@ type Status struct {
 	LastCheckinOK  bool      `json:"last_checkin_ok,omitempty"`
 	LastCheckinAt  time.Time `json:"last_checkin_at,omitempty"`
 	LastCheckinMsg string    `json:"last_checkin_msg,omitempty"`
+	Enterprise     bool      `json:"enterprise,omitempty"` // 企业版 Trae 账号（无签到/积分活动）
 }
 
 type entry struct {
@@ -323,6 +324,7 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		LastCheckinOK:  e.lastCheckinOK,
 		LastCheckinAt:  e.lastCheckinAt,
 		LastCheckinMsg: e.lastCheckinMsg,
+		Enterprise:     e.a.Enterprise,
 	}
 }
 

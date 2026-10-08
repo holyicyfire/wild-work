@@ -250,9 +250,13 @@ func (a *App) Quit() {
 // 账号操作
 // ---------------------------------------------------------------------------
 
-// StartLoginFor 发起指定渠道登录：workbuddy / traework / qoder。
+// StartLoginFor 发起指定渠道登录：workbuddy / traework / traework_ent / qoder。
 func (a *App) StartLoginFor(kind string) (string, error) {
-	k := provider.Kind(strings.TrimSpace(kind))
+	norm := strings.TrimSpace(kind)
+	// traework_ent：企业版 Trae 渠道变体 —— 复用 traework 运行时/账号池/轮询，
+	// 仅登录入口走企业实例（host/client_id 可由 config.enterprise_trae 覆盖）。
+	entLogin := norm == "traework_ent"
+	k := provider.Kind(norm)
 	if k == "" {
 		k = provider.WorkBuddy
 	}
@@ -282,7 +286,18 @@ func (a *App) StartLoginFor(kind string) (string, error) {
 	var err error
 	switch k {
 	case provider.TraeWork:
-		authURL, err = logintrae.Start(a.loginClient, a.loginStateFP)
+		if entLogin {
+			opts := logintrae.LoginOpts{Enterprise: true}
+			if h := a.cfg.EnterpriseTrae.ConsoleHost; h != "" {
+				opts.ConsoleHost = h
+			}
+			if id := a.cfg.EnterpriseTrae.ClientID; id != "" {
+				opts.ClientID = id
+			}
+			authURL, err = logintrae.StartWithOpts(a.loginClient, a.loginStateFP, opts)
+		} else {
+			authURL, err = logintrae.Start(a.loginClient, a.loginStateFP)
+		}
 	case provider.Qoder:
 		authURL, err = loginqoder.Start(a.loginClient, a.loginStateFP)
 	default:
@@ -764,6 +779,7 @@ type AccountView struct {
 	LastCheckinOK  bool   `json:"last_checkin_ok"`
 	LastCheckinAt  string `json:"last_checkin_at"`
 	LastCheckinMsg string `json:"last_checkin_msg"`
+	Enterprise     bool   `json:"enterprise,omitempty"` // 企业版 Trae 账号
 }
 
 // State Web UI 初始数据。
@@ -816,6 +832,7 @@ func (a *App) accountViews() []AccountView {
 			LastCheckinOK:  s.LastCheckinOK,
 			LastCheckinAt:  fmtTime(s.LastCheckinAt),
 			LastCheckinMsg: s.LastCheckinMsg,
+			Enterprise:     s.Enterprise,
 		})
 	}
 	return out

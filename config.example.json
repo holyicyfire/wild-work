@@ -19,5 +19,9 @@
   },
   "upstream": {
     "timeout_seconds": 120
+  },
+  "enterprise_trae": {
+    "console_host": "https://trae.comnova.cc",
+    "client_id": ""
   }
 }

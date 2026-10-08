@@ -313,3 +313,31 @@ func TestCheckinAccountRecordsResult(t *testing.T) {
 		t.Error("want error for unknown uid")
 	}
 }
+
+// TestCheckinEnterpriseAccountSkipsCheckin 企业版 Trae 账号：签到调度直接 no-op（OK + 无上游调用），
+// token 有效时连 refresh 也不打。
+func TestCheckinEnterpriseAccountSkipsCheckin(t *testing.T) {
+	f := &fakeUpstream{}
+	srv := f.server()
+	defer srv.Close()
+
+	p := pool.New("")
+	a := &auth.Auth{UID: "ent1", AccessToken: "at", RefreshToken: "rt", ExpiresAt: 9999999999, Enterprise: true}
+	p.Add(a)
+
+	up := &upstream.Client{
+		HTTP:            srv.Client(),
+		ChatBaseCN:      srv.URL,
+		BillingBaseCN:   srv.URL,
+		ChatBaseGlobal:  srv.URL,
+		BillingBaseGlob: srv.URL,
+	}
+	s := New(Config{Pool: p, Upstream: up})
+	res, err := s.CheckinAccount("ent1")
+	if err != nil || !res.OK {
+		t.Fatalf("checkin result: res=%+v err=%v", res, err)
+	}
+	if f.checkinCalls.Load() != 0 || f.refreshCalls.Load() != 0 {
+		t.Fatalf("enterprise checkin should not hit upstream: checkin=%d refresh=%d", f.checkinCalls.Load(), f.refreshCalls.Load())
+	}
+}

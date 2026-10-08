@@ -26,4 +26,23 @@ const (
 	EpModelsPricing = "/api/remote/v1/models"                    // 模型定价接口
 )
 
+// 企业版 Trae（ToB 单域名整栈部署，如 https://trae.comnova.cc）默认值。
+// 与个人版共用同一套 Trae 服务端代码，核心 API 路径同构；
+// 企业实例为单域名：console/oauth/agent 全部走同一 host，随账号持久化到 auth.apiHost。
+// client_id 待实测：先试官方 solo id，不通则换企业 CLI id ono9krqynydwx5（配置可覆盖）。
+const (
+	EntDefaultConsoleHost = "https://trae.comnova.cc"
+	EntDefaultClientID    = ClientID // 默认沿用官方 solo id；验证失败改用 ono9krqynydwx5
+	EntAltClientID        = "ono9krqynydwx5"
+	// 企业版 auth_from 枚举含 solo（回调会追加 refreshToken，正是标准续期路径所需）。
+	// 与个人版一致，不改。
+	EntAuthFrom = "solo"
+)
+
+// 企业版业务码（HTTP 200 + body code 非零；与企业版前端错误码枚举一致）
+const (
+	EntCodeRefreshInvalid = 30021 // RefreshTokenInvalid
+	EntCodeNotLogin       = 30011 // 请先登录
+)
+
 const DefaultConfigName = "glm-5.2"

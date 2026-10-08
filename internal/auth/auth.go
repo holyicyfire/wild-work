@@ -31,7 +31,10 @@ type Auth struct {
 	UID          string
 	EnterpriseID string
 	Nickname     string
-	FilePath     string // 来源文件；refresh 后原子写回此处
+	// Enterprise 标记企业版 Trae 账号（ToB 单域名实例）：chat/models/续期全部走 ApiHost，
+	// 签到与积分查询跳过（企业积分由租户管理）。个人版恒为 false。
+	Enterprise bool
+	FilePath   string // 来源文件；refresh 后原子写回此处
 }
 
 // Lock 供同进程内其他包（upstream.RefreshToken）在改写 Auth 字段期间加锁。
@@ -107,6 +110,7 @@ func Parse(raw []byte) (*Auth, error) {
 				UID          string `json:"uid"`
 				EnterpriseID string `json:"enterpriseId"`
 				Nickname     string `json:"nickname"`
+				Enterprise   bool   `json:"enterprise"` // 企业版 Trae 账号标志（老文件缺省 false）
 			} `json:"account"`
 		}
 		if err := json.Unmarshal(raw, &n); err != nil {
@@ -125,6 +129,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID:          n.Account.UID,
 			EnterpriseID: n.Account.EnterpriseID,
 			Nickname:     n.Account.Nickname,
+			Enterprise:   n.Account.Enterprise,
 		}
 	} else {
 		var f struct {
@@ -140,6 +145,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID          string `json:"uid"`
 			EnterpriseID string `json:"enterpriseId"`
 			Nickname     string `json:"nickname"`
+			Enterprise   bool   `json:"enterprise"` // 企业版 Trae 账号标志（老文件缺省 false）
 		}
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, fmt.Errorf("storage_parse_error: %w", err)
@@ -157,6 +163,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID:          f.UID,
 			EnterpriseID: f.EnterpriseID,
 			Nickname:     f.Nickname,
+			Enterprise:   f.Enterprise,
 		}
 	}
 	if strings.TrimSpace(a.AccessToken) == "" {
@@ -195,6 +202,7 @@ func (a *Auth) saveAtomicLocked() error {
 			"uid":          a.UID,
 			"enterpriseId": a.EnterpriseID,
 			"nickname":     a.Nickname,
+			"enterprise":   a.Enterprise,
 		},
 	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
