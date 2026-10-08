@@ -106,45 +106,139 @@ func entExtractModel(body []byte) string {
 }
 
 // entBuildChatBody 把 OpenAI chat/completions 请求体改写为 llm_raw_chat 格式。
-// 依据抓包 §2.6：content 为内容块数组（类 Anthropic）；携带 config_name/model_name/
-// conversation_id/session_id；无 stream/model/function 字段；tools 保持 OpenAI 函数风格透传。
+// 依据抓包 §2.6 采用【白名单构造】：只发送上游已验证的键，
+// 不透传 OpenAI 特有字段（stream_options/max_tokens/temperature/reasoning_effort 等
+// 均导致上游 500，2026-10-08 实测）。
+// 消息/tool 差异规则移植自 cpa-plugin（实测验证）：
+//   - tools 的 function.parameters 必须是字符串化 JSON（对象直接上游 500）
+//   - assistant 空 content 必须单空格占位（有 tool_calls 时也如此）
+//   - assistant 的 tool_calls 改用 function_call 键 + index（非 OpenAI 的 function 键）
+//   - tool 角色消息保留 tool_call_id，content 同样块化+空占位
 func entBuildChatBody(src []byte, configName, modelName string) ([]byte, string, error) {
-	var obj map[string]any
-	if len(src) > 0 && json.Unmarshal(src, &obj) != nil {
+	var in map[string]any
+	if len(src) > 0 && json.Unmarshal(src, &in) != nil {
 		return nil, "", fmt.Errorf("ent chat body parse failed")
 	}
-	if obj == nil {
-		obj = map[string]any{}
-	}
-	delete(obj, "stream")
-	delete(obj, "model")
-	delete(obj, "function")
-	delete(obj, "tool_choice") // llm_raw_chat 无此字段（抓包体不存在），避免上游严格校验拒绝
-	if msgs, ok := obj["messages"].([]any); ok {
+	out := map[string]any{}
+	if msgs, ok := in["messages"].([]any); ok {
+		outMsgs := make([]any, 0, len(msgs))
 		for _, mi := range msgs {
 			m, ok := mi.(map[string]any)
 			if !ok {
 				continue
 			}
-			if r, _ := m["role"].(string); r == "developer" {
-				m["role"] = "system" // 与 PrepareBody 同规则：上游只认 system/assistant/user/tool
+			role, _ := m["role"].(string)
+			if role == "developer" {
+				role = "system"
 			}
-			// string content → 内容块数组
-			if s, ok := m["content"].(string); ok {
-				m["content"] = []any{map[string]any{"type": "text", "text": s}}
+			switch {
+			case role == "assistant" && m["tool_calls"] != nil:
+				outMsgs = append(outMsgs, map[string]any{
+					"role":       role,
+					"content":    entAssistantBlocks(m["content"]),
+					"tool_calls": entToolCallsJSON(m["tool_calls"]),
+				})
+			case role == "tool":
+				outMsgs = append(outMsgs, map[string]any{
+					"role":         "tool",
+					"content":      entAssistantBlocks(m["content"]),
+					"tool_call_id": m["tool_call_id"],
+				})
+			default:
+				if s, ok := m["content"].(string); ok {
+					m["content"] = []any{map[string]any{"type": "text", "text": s}}
+				}
+				m["role"] = role
+				outMsgs = append(outMsgs, m)
 			}
 		}
+		out["messages"] = outMsgs
+	}
+	if tools, ok := in["tools"].([]any); ok && len(tools) > 0 {
+		out["tools"] = entToolsForTrae(tools)
 	}
 	sessID := genUUID()
-	obj["config_name"] = configName
-	obj["model_name"] = modelName
-	obj["conversation_id"] = genUUID()
-	obj["session_id"] = sessID
-	raw, err := json.Marshal(obj)
+	out["config_name"] = configName
+	out["model_name"] = modelName
+	out["conversation_id"] = genUUID()
+	out["session_id"] = sessID
+	raw, err := json.Marshal(out)
 	if err != nil {
 		return nil, "", err
 	}
 	return raw, sessID, nil
+}
+
+// entToolsForTrae 把每个 tool 的 function.parameters 对象字符串化。
+// Trae 严格要求 parameters 为 JSON 字符串；传对象上游返回 500（cpa-plugin 实测同款）。
+func entToolsForTrae(tools []any) []any {
+	for _, ti := range tools {
+		t, ok := ti.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, ok := t["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		p, ok := fn["parameters"]
+		if !ok {
+			continue
+		}
+		if _, isStr := p.(string); isStr {
+			continue
+		}
+		if b, err := json.Marshal(p); err == nil {
+			fn["parameters"] = string(b)
+		}
+	}
+	return tools
+}
+
+// entAssistantBlocks assistant/tool 消息的内容块；空/纯空白内容 → 单空格占位
+//（Trae 拒绝空 assistant content，即使携带 tool_calls；对齐真实 trae-cli 抓包）。
+func entAssistantBlocks(content any) []any {
+	if s, ok := content.(string); ok && strings.TrimSpace(s) != "" {
+		return []any{map[string]any{"type": "text", "text": s}}
+	}
+	if arr, ok := content.([]any); ok && len(arr) > 0 {
+		for _, bi := range arr {
+			if b, ok := bi.(map[string]any); ok {
+				if t, _ := b["text"].(string); strings.TrimSpace(t) != "" {
+					return arr
+				}
+			}
+		}
+	}
+	return []any{map[string]any{"type": "text", "text": " "}}
+}
+
+// entToolCallsJSON OpenAI tool_calls → Trae 线上格式：
+// [{index, id, type:"function", function_call:{name, arguments}}]。
+// 注意 Trae 用 function_call 键（非 OpenAI 的 function）。
+func entToolCallsJSON(calls any) any {
+	arr, ok := calls.([]any)
+	if !ok {
+		return calls
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for i, ci := range arr {
+		c, ok := ci.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, _ := c["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		args, _ := fn["arguments"].(string)
+		id, _ := c["id"].(string)
+		out = append(out, map[string]any{
+			"index":         i,
+			"id":            id,
+			"type":          "function",
+			"function_call": map[string]any{"name": name, "arguments": args},
+		})
+	}
+	return out
 }
 
 // entChatHeaders 按抓包 §2.4 注入企业对话头。

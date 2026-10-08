@@ -218,12 +218,14 @@ func TestGetUserInfoPersonalResultFormat(t *testing.T) {
 	}
 }
 
-// TestEntBuildChatBody OpenAI 体 → llm_raw_chat 体：content 块化、developer→system、
-// 注入 config_name/model_name/conversation_id/session_id、剔除 stream/model/function。
+// TestEntBuildChatBody OpenAI 体 → llm_raw_chat 体：白名单构造。
+// content 块化、developer→system、注入四键；OpenAI 特有字段全部剔除。
 func TestEntBuildChatBody(t *testing.T) {
-	src := []byte(`{"model":"glm-5.2","stream":true,"messages":[
+	src := []byte(`{"model":"glm-5.2","stream":true,"temperature":0.7,"max_tokens":4096,` +
+		`"stream_options":{"include_usage":true},"reasoning_effort":"medium","messages":[
 		{"role":"developer","content":"be brief"},
-		{"role":"user","content":"hi"}]}`)
+		{"role":"user","content":"hi"}],
+		"tools":[{"type":"function","function":{"name":"f","parameters":{}}}]}`)
 	out, sess, err := entBuildChatBody(src, "glm-5.2", "glm-5.2__dev")
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -235,9 +237,11 @@ func TestEntBuildChatBody(t *testing.T) {
 	if json.Unmarshal(out, &m) != nil {
 		t.Fatal("output not json")
 	}
-	for _, k := range []string{"model", "stream", "function", "tool_choice"} {
-		if _, ok := m[k]; ok {
-			t.Fatalf("key %q should be removed", k)
+	// 白名单：只允许这 6 个键
+	allowed := map[string]bool{"config_name": true, "model_name": true, "conversation_id": true, "session_id": true, "messages": true, "tools": true}
+	for k := range m {
+		if !allowed[k] {
+			t.Fatalf("unexpected key %q in whitelist body", k)
 		}
 	}
 	if m["config_name"] != "glm-5.2" || m["model_name"] != "glm-5.2__dev" {
@@ -252,6 +256,9 @@ func TestEntBuildChatBody(t *testing.T) {
 	blk := blocks[0].(map[string]any)
 	if blk["type"] != "text" || blk["text"] != "be brief" {
 		t.Fatalf("content block wrong: %v", blk)
+	}
+	if _, ok := m["tools"]; !ok {
+		t.Fatal("tools should be passed through")
 	}
 }
 
@@ -301,5 +308,74 @@ func TestAggregateEnterpriseSSE(t *testing.T) {
 	msg := res["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
 	if msg["content"] != "成功" {
 		t.Fatalf("content=%v", msg["content"])
+	}
+}
+
+// TestEntToolsForTrae parameters 对象必须字符串化（Trae 严格要求，对象上游 500）。
+func TestEntToolsForTrae(t *testing.T) {
+	src := []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":[
+		{"type":"function","function":{"name":"read_file","description":"Read","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}]}`)
+	out, _, err := entBuildChatBody(src, "glm-5.2", "glm-5.2__dev")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var m map[string]any
+	if json.Unmarshal(out, &m) != nil {
+		t.Fatal("not json")
+	}
+	tools := m["tools"].([]any)
+	fn := tools[0].(map[string]any)["function"].(map[string]any)
+	p, ok := fn["parameters"].(string)
+	if !ok {
+		t.Fatalf("parameters should be stringified, got %T", fn["parameters"])
+	}
+	var schema map[string]any
+	if json.Unmarshal([]byte(p), &schema) != nil {
+		t.Fatal("stringified parameters is not valid json")
+	}
+	if schema["type"] != "object" {
+		t.Fatalf("schema type=%v", schema["type"])
+	}
+}
+
+// TestEntToolCallsAndEmptyContent assistant tool_calls 用 function_call 键 + index；
+// assistant/tool 空 content 单空格占位；tool 角色保留 tool_call_id。
+func TestEntToolCallsAndEmptyContent(t *testing.T) {
+	src := []byte(`{"messages":[
+		{"role":"user","content":"list files"},
+		{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"ls","arguments":"{}"}}]},
+		{"role":"tool","tool_call_id":"call_1","content":"a.txt"},
+		{"role":"assistant","content":"done"}]}`)
+	out, _, err := entBuildChatBody(src, "glm-5.2", "glm-5.2__dev")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var m map[string]any
+	if json.Unmarshal(out, &m) != nil {
+		t.Fatal("not json")
+	}
+	msgs := m["messages"].([]any)
+	asst := msgs[1].(map[string]any)
+	tcs := asst["tool_calls"].([]any)
+	tc := tcs[0].(map[string]any)
+	if tc["index"] != float64(0) || tc["id"] != "call_1" {
+		t.Fatalf("tool_calls entry wrong: %v", tc)
+	}
+	fc := tc["function_call"].(map[string]any)
+	if fc["name"] != "ls" || fc["arguments"] != "{}" {
+		t.Fatalf("function_call wrong: %v", fc)
+	}
+	if _, hasFnKey := tc["function"]; hasFnKey {
+		t.Fatal("tool_calls must NOT carry OpenAI function key")
+	}
+	// 空 assistant content → 单空格占位
+	blocks := asst["content"].([]any)
+	if blk := blocks[0].(map[string]any); blk["text"] != " " {
+		t.Fatalf("empty assistant content should be space placeholder, got %v", blk)
+	}
+	// tool 角色保留 tool_call_id
+	toolMsg := msgs[2].(map[string]any)
+	if toolMsg["tool_call_id"] != "call_1" || toolMsg["role"] != "tool" {
+		t.Fatalf("tool msg wrong: %v", toolMsg)
 	}
 }
